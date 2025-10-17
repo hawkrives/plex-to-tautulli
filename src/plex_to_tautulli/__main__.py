@@ -6,11 +6,11 @@ from dotenv import load_dotenv
 from os import environ, remove
 from sqlite3 import connect
 
-load_dotenv()
+load_dotenv(verbose=True)
 
 PLEX_URL = f'http://{environ["PLEX_URL"]}:{environ["PLEX_PORT"]}'
 PLEX_TOKEN = f'X-Plex-Token={environ["PLEX_API_KEY"]}'
-TAUTULLI_URL = f'http://{environ["TAUTULLI_URL"]}:{environ["TAUTULLI_PORT"]}/api/v2?apikey={environ["TAUTULLI_API_KEY"]}'
+TAUTULLI_URL = f'{environ["TAUTULLI_URL"]}/api/v2?apikey={environ["TAUTULLI_API_KEY"]}'
 
 class TautulliUser:
 	def __init__(self, user_id: int, username: str, **kwargs) -> None:
@@ -149,34 +149,34 @@ class PlexHistory:
 
 def main():
 	""""""
-	# Fetch all plex users for easy lookup
+	print("Fetch all plex users for easy lookup")
 	plex_users = {u.id: u for u in fetch_plex_users()}
-	# Fetch all the tautulli users to map plex users
+	print("Fetch all the tautulli users to map plex users")
 	tautulli_users = fetch_tautulli_users()
 	tautulli_users_by_username = {t.username: t for t in tautulli_users}
 	tautulli_users_by_user_id = {t.user_id: t for t in tautulli_users}
-	# Fetch all plex devices for easy lookup
+	print("Fetch all plex devices for easy lookup")
 	devices = {d.id: d for d in fetch_plex_devices()}
-	# Fetch all libraries
-	libraries = {l.key: l for l in fetch_plex_libraries()}
+	print("Fetch all libraries")
+	libraries = {library.key: library for library in fetch_plex_libraries()}
 	# Fetch the following based on the libraries
 	medias: list[PlexMedia] = []
 	for library in libraries.values():
-		# Fetch all plex movies
+		print(f"{library.key} Fetch all plex movies")
 		if library.type_ == 'movie':
 			data = fetch_movie_media(library)
 			medias.extend(data)
-		# Fetch all plex tv shows
+		print(f"{library.key} Fetch all plex tv shows")
 		if library.type_ == 'show':
 			data = fetch_show_media(library)
 			medias.extend(data)
 	media_dict: dict[str, PlexMedia] = {m.rating_key: m for m in medias}
-	# Fetch all plex session history
+	print("Fetch all plex session history")
 	history = fetch_plex_history()
 	# For each session history entry
 	inserts: list[tuple[PlexHistory, PlexMedia, PlexDevice, TautulliUser]] = []
 	for hist in history:
-		# Find the matching media
+		print(f"{hist.history_key} Find the matching media")
 		# TODO: Try and use medias to look this up
 		if hist.rating_key is None:
 			print(f'No rating key for {hist.history_key}, skipping')
@@ -195,6 +195,7 @@ def main():
 				continue
 			user = tautulli_user
 		inserts.append((hist, media, device, user))
+	print("Inserting history into database...")
 	insert_history(inserts)
 
 def fetch_plex_users() -> list[PlexUser]:
@@ -380,5 +381,7 @@ def init_db():
 	db.close()
 
 if __name__ == "__main__":
+	print("Initializing database...")
 	init_db()
+	print("Initialized database.")
 	main()
