@@ -1,5 +1,7 @@
 # Plex History to Tautulli
-A Python script to convert Plex history from the API to the Tautulli database import format. Born out of spite of all the reddit posts and the FAQ saying it can't be done. 
+A Python script to convert Plex history from the API to the Tautulli database import format. Born out of spite of all the reddit posts and the FAQ saying it can't be done.
+
+**Note:** This script now uses the modern Plex JSON API as documented at https://developer.plex.tv/pms/. It no longer requires BeautifulSoup or XML parsing. 
 
 ## Per the FAQ
 > _**Q: Can Tautulli import history from before it was installed?**_
@@ -65,7 +67,7 @@ Once the script is complete, there will be a `plex_to_tautulli.db` file in the f
 This currently only support `movie` and `show` library types.
 
 ## Missing Media
-Media that has been deleted from the Plex server or is just missing metadata will not be included. These entries are usually missing the `ratingKey` from the Plex History API call. These can be verified by going to `http://PLEX_URL:PLEX_PORT/status/sessions/history/all?X-Plex-Token=PLEX_API_KEY&limit=100000`
+Media that has been deleted from the Plex server or is just missing metadata will not be included. These entries are usually missing the `ratingKey` from the Plex History API call. These can be verified using the Plex API endpoint: `http://PLEX_URL:PLEX_PORT/status/sessions/history/all` with the header `X-Plex-Token: PLEX_API_KEY` and `Accept: application/json`
 
 ## SSH Support
 This script appends `http://` to the environment variable `PLEX_URL` and thus only supports `HTTP` at the moment
