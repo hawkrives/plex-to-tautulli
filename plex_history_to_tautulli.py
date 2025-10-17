@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import requests as r
-from bs4 import BeautifulSoup as Soup
 from dotenv import load_dotenv
 from os import environ, remove
 from sqlite3 import connect
@@ -9,7 +8,11 @@ from sqlite3 import connect
 load_dotenv()
 
 PLEX_URL = f'http://{environ["PLEX_URL"]}:{environ["PLEX_PORT"]}'
-PLEX_TOKEN = f'X-Plex-Token={environ["PLEX_API_KEY"]}'
+PLEX_TOKEN = environ["PLEX_API_KEY"]
+PLEX_HEADERS = {
+	'Accept': 'application/json',
+	'X-Plex-Token': PLEX_TOKEN
+}
 TAUTULLI_URL = f'http://{environ["TAUTULLI_URL"]}:{environ["TAUTULLI_PORT"]}/api/v2?apikey={environ["TAUTULLI_API_KEY"]}'
 
 class TautulliUser:
@@ -199,9 +202,10 @@ def main():
 
 def fetch_plex_users() -> list[PlexUser]:
 	"""Fetches all the plex users in the plex server."""
-	resp = r.get(f'{PLEX_URL}/accounts?{PLEX_TOKEN}')
-	xml = Soup(resp.text, 'xml')
-	return [PlexUser(**a.attrs) for a in xml('Account')]
+	resp = r.get(f'{PLEX_URL}/accounts', headers=PLEX_HEADERS)
+	data = resp.json()
+	accounts = data.get('MediaContainer', {}).get('Account', [])
+	return [PlexUser(**a) for a in accounts]
 
 def fetch_tautulli_users() -> list[TautulliUser]:
 	"""Fetches all the tautulli users in the server."""
@@ -210,29 +214,35 @@ def fetch_tautulli_users() -> list[TautulliUser]:
 
 def fetch_plex_devices() -> list[PlexDevice]:
 	"""Fetches all the plex devices in the plex server."""
-	resp = r.get(f'{PLEX_URL}/devices?{PLEX_TOKEN}')
-	xml = Soup(resp.text, 'xml')
-	return [PlexDevice(**d.attrs) for d in xml('Device')]
+	resp = r.get(f'{PLEX_URL}/devices', headers=PLEX_HEADERS)
+	data = resp.json()
+	devices = data.get('MediaContainer', {}).get('Device', [])
+	return [PlexDevice(**d) for d in devices]
 
 def fetch_plex_libraries() -> list[PlexLibrary]:
 	"""Fetches all the plex libraries in the plex server."""
-	resp = r.get(f'{PLEX_URL}/library/sections/?{PLEX_TOKEN}')
-	xml = Soup(resp.text, 'xml')
-	return [PlexLibrary(**l.attrs) for l in xml('Directory')]
+	resp = r.get(f'{PLEX_URL}/library/sections/', headers=PLEX_HEADERS)
+	data = resp.json()
+	directories = data.get('MediaContainer', {}).get('Directory', [])
+	return [PlexLibrary(**l) for l in directories]
 
 def fetch_movie_media(lib: PlexLibrary) -> list[PlexMedia]:
 	"""Fetches all the movies in a plex library."""
-	resp = r.get(f'{PLEX_URL}/library/sections/{lib.section_id}/all?{PLEX_TOKEN}&limit=100000&includeGuids=true')
-	xml = Soup(resp.text, 'xml')
+	resp = r.get(f'{PLEX_URL}/library/sections/{lib.section_id}/all', headers=PLEX_HEADERS, params={'limit': 100000, 'includeGuids': 'true'})
+	data = resp.json()
+	videos = data.get('MediaContainer', {}).get('Metadata', [])
 	medias = []
-	for video in xml('Video'):
+	for video in videos:
 		media_dict = {}
-		media_dict.update(video.attrs)
-		media_dict.update(video.Media.attrs)
-		media_dict['genres'] = ';'.join([g.attrs['tag'] for g in video('Genre')])
-		media_dict['directors'] = ';'.join([g.attrs['tag'] for g in video('Director')])
-		media_dict['writers'] = ';'.join([g.attrs['tag'] for g in video('Writer')])
-		media_dict['actors'] = ';'.join([g.attrs['tag'] for g in video('Role')])
+		media_dict.update(video)
+		# Handle nested Media object
+		if 'Media' in video and len(video['Media']) > 0:
+			media_dict.update(video['Media'][0])
+		# Handle Genre, Director, Writer, Role arrays
+		media_dict['genres'] = ';'.join([g.get('tag', '') for g in video.get('Genre', [])])
+		media_dict['directors'] = ';'.join([g.get('tag', '') for g in video.get('Director', [])])
+		media_dict['writers'] = ';'.join([g.get('tag', '') for g in video.get('Writer', [])])
+		media_dict['actors'] = ';'.join([g.get('tag', '') for g in video.get('Role', [])])
 		media = PlexMedia(**media_dict)
 		# print(media)
 		medias.append(media)
@@ -240,26 +250,34 @@ def fetch_movie_media(lib: PlexLibrary) -> list[PlexMedia]:
 
 def fetch_show_media(lib: PlexLibrary) -> list[PlexMedia]:
 	"""Fetches all the episodes in each season of each TV show."""
-	resp = r.get(f'{PLEX_URL}/library/sections/{lib.section_id}/all?{PLEX_TOKEN}&limit=100000&includeGuids=true')
-	xml = Soup(resp.text, 'xml')
+	resp = r.get(f'{PLEX_URL}/library/sections/{lib.section_id}/all', headers=PLEX_HEADERS, params={'limit': 100000, 'includeGuids': 'true'})
+	data = resp.json()
+	shows = data.get('MediaContainer', {}).get('Metadata', [])
 	medias = []
-	for show in xml('Directory'):
-		resp = r.get(f'{PLEX_URL}/library/metadata/{show.attrs["ratingKey"]}/children?{PLEX_TOKEN}')
-		season_xml = Soup(resp.text, 'xml')
-		seasons = [s for s in season_xml('Directory') if 'ratingKey' in s.attrs]
+	for show in shows:
+		# Get seasons for this show
+		resp = r.get(f'{PLEX_URL}/library/metadata/{show["ratingKey"]}/children', headers=PLEX_HEADERS)
+		season_data = resp.json()
+		seasons = season_data.get('MediaContainer', {}).get('Metadata', [])
+		seasons = [s for s in seasons if 'ratingKey' in s]
 		for season in seasons:
-			resp = r.get(f'{PLEX_URL}/library/metadata/{season.attrs["ratingKey"]}/children?{PLEX_TOKEN}')
-			episode_xml = Soup(resp.text, 'xml')
-			for episode in episode_xml('Video'):
+			# Get episodes for this season
+			resp = r.get(f'{PLEX_URL}/library/metadata/{season["ratingKey"]}/children', headers=PLEX_HEADERS)
+			episode_data = resp.json()
+			episodes = episode_data.get('MediaContainer', {}).get('Metadata', [])
+			for episode in episodes:
 				media_dict = {}
-				media_dict.update(episode.attrs)
-				media_dict.update(episode.Media.attrs)
-				media_dict['genres'] = ';'.join([g.attrs['tag'] for g in show('Genre')])
-				media_dict['directors'] = ';'.join([g.attrs['tag'] for g in show('Director')])
-				media_dict['writers'] = ';'.join([g.attrs['tag'] for g in show('Writer')])
-				media_dict['actors'] = ';'.join([g.attrs['tag'] for g in show('Role')])
-				media_dict['lastViewedAt'] = show.attrs.get('lastViewedAt', '')
-				media_dict['studio'] = show.attrs.get('studio', '')
+				media_dict.update(episode)
+				# Handle nested Media object
+				if 'Media' in episode and len(episode['Media']) > 0:
+					media_dict.update(episode['Media'][0])
+				# Get metadata from show level
+				media_dict['genres'] = ';'.join([g.get('tag', '') for g in show.get('Genre', [])])
+				media_dict['directors'] = ';'.join([g.get('tag', '') for g in show.get('Director', [])])
+				media_dict['writers'] = ';'.join([g.get('tag', '') for g in show.get('Writer', [])])
+				media_dict['actors'] = ';'.join([g.get('tag', '') for g in show.get('Role', [])])
+				media_dict['lastViewedAt'] = show.get('lastViewedAt', '')
+				media_dict['studio'] = show.get('studio', '')
 				media = PlexMedia(**media_dict)
 				# print(media.__dict__)
 				medias.append(media)
@@ -267,9 +285,10 @@ def fetch_show_media(lib: PlexLibrary) -> list[PlexMedia]:
 
 def fetch_plex_history() -> list[PlexHistory]:
 	"""Fetches all the history from the plex server."""
-	resp = r.get(f'{PLEX_URL}/status/sessions/history/all?{PLEX_TOKEN}&limit=100000')
-	xml = Soup(resp.text, 'xml')
-	return [PlexHistory(**h.attrs) for h in xml('Video')]
+	resp = r.get(f'{PLEX_URL}/status/sessions/history/all', headers=PLEX_HEADERS, params={'limit': 100000})
+	data = resp.json()
+	videos = data.get('MediaContainer', {}).get('Metadata', [])
+	return [PlexHistory(**h) for h in videos]
 
 def insert_history(histories: list[tuple[PlexHistory, PlexMedia, PlexDevice, TautulliUser]]):
 	"""Inserts the histories into the plex_to_tautulli.db file"""
