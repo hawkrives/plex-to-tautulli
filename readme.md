@@ -62,7 +62,7 @@ Once the script is complete, there will be a `plex_to_tautulli.db` file in the f
 # Known Issues/Lack of Features
 
 ## Library Support
-This currently only support `movie` and `show` library types.
+This supports `movie`, `show`, and `artist` (music) library types.
 
 ## Missing Media
 Media that has been deleted from the Plex server or is just missing metadata will not be included. These entries are usually missing the `ratingKey` from the Plex History API call. These can be verified by going to `http://PLEX_URL:PLEX_PORT/status/sessions/history/all?X-Plex-Token=PLEX_API_KEY&limit=100000`

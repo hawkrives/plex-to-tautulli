@@ -170,6 +170,10 @@ def main():
 		if library.type_ == 'show':
 			data = fetch_show_media(library)
 			medias.extend(data)
+		# Fetch all plex music tracks
+		if library.type_ == 'artist':
+			data = fetch_music_media(library)
+			medias.extend(data)
 	media_dict: dict[str, PlexMedia] = {m.rating_key: m for m in medias}
 	# Fetch all plex session history
 	history = fetch_plex_history()
@@ -265,11 +269,50 @@ def fetch_show_media(lib: PlexLibrary) -> list[PlexMedia]:
 				medias.append(media)
 	return medias
 
+def fetch_music_media(lib: PlexLibrary) -> list[PlexMedia]:
+	"""Fetches all the tracks in each album of each artist."""
+	resp = r.get(f'{PLEX_URL}/library/sections/{lib.section_id}/all?{PLEX_TOKEN}&limit=100000&includeGuids=true')
+	xml = Soup(resp.text, 'xml')
+	medias = []
+	for artist in xml('Directory'):
+		resp = r.get(f'{PLEX_URL}/library/metadata/{artist.attrs["ratingKey"]}/children?{PLEX_TOKEN}')
+		album_xml = Soup(resp.text, 'xml')
+		albums = [a for a in album_xml('Directory') if 'ratingKey' in a.attrs]
+		for album in albums:
+			resp = r.get(f'{PLEX_URL}/library/metadata/{album.attrs["ratingKey"]}/children?{PLEX_TOKEN}')
+			track_xml = Soup(resp.text, 'xml')
+			for track in track_xml('Track'):
+				media_dict = {}
+				media_dict.update(track.attrs)
+				if track.Media:
+					media_dict.update(track.Media.attrs)
+				media_dict['genres'] = ';'.join([g.attrs['tag'] for g in artist('Genre')])
+				# For music, actors represents artists/performers
+				media_dict['actors'] = ';'.join([g.attrs['tag'] for g in artist('Role')])
+				media_dict['lastViewedAt'] = artist.attrs.get('lastViewedAt', '')
+				media_dict['studio'] = artist.attrs.get('studio', '')
+				# Store album info in parent fields (similar to TV episodes)
+				media_dict['parentTitle'] = album.attrs.get('title', '')
+				media_dict['parentRatingKey'] = album.attrs.get('ratingKey', '')
+				media_dict['parentThumb'] = album.attrs.get('thumb', '')
+				# Store artist info in grandparent fields
+				media_dict['grandparentTitle'] = artist.attrs.get('title', '')
+				media_dict['grandparentRatingKey'] = artist.attrs.get('ratingKey', '')
+				media_dict['grandparentThumb'] = artist.attrs.get('thumb', '')
+				media = PlexMedia(**media_dict)
+				# print(media.__dict__)
+				medias.append(media)
+	return medias
+
 def fetch_plex_history() -> list[PlexHistory]:
 	"""Fetches all the history from the plex server."""
 	resp = r.get(f'{PLEX_URL}/status/sessions/history/all?{PLEX_TOKEN}&limit=100000')
 	xml = Soup(resp.text, 'xml')
-	return [PlexHistory(**h.attrs) for h in xml('Video')]
+	# Fetch both Video (movies/shows) and Track (music) history
+	history = []
+	history.extend([PlexHistory(**h.attrs) for h in xml('Video')])
+	history.extend([PlexHistory(**h.attrs) for h in xml('Track')])
+	return history
 
 def insert_history(histories: list[tuple[PlexHistory, PlexMedia, PlexDevice, TautulliUser]]):
 	"""Inserts the histories into the plex_to_tautulli.db file"""
