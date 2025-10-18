@@ -16,3 +16,6 @@ plex-to-tautulli = "plex_to_tautulli:__main__"
 [build-system]
 requires = ["uv_build>=0.7.0,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 140
